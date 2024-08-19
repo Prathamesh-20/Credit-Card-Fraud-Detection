@@ -1,0 +1,182 @@
+---
+title: "Credit card fraud Detection Using Random Forest & Logistic Regression"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+Setting the Working Directory 
+
+```{r}
+setwd("D:/Data science")
+
+```
+
+Load required libraries
+
+```{r}
+library(randomForest)
+library(caTools)
+library(smotefamily) 
+library(caret)
+library(ggplot2)
+
+```
+
+Read the dataset in csv format
+```{r}
+df_og <- read.csv("creditcard.csv")
+```
+
+Checking the imbalance in the class through plot
+```{r}
+cat("\n Checking Class Imbalance...")
+0
+common_theme <- theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+plot1 <- ggplot(data = df_og, aes(x = factor(Class), 
+                      y = prop.table(stat(count)), fill = factor(Class),
+                      label = scales::percent(prop.table(stat(count))))) +
+  geom_bar(position = "dodge") + 
+  geom_text(stat = 'count',
+            position = position_dodge(.9), 
+            vjust = -0.5, 
+            size = 3) + 
+  scale_x_discrete(labels = c("no fraud", "fraud"))+
+  scale_y_continuous(labels = scales::percent)+
+  labs(x = 'Class', y = 'Percentage') +
+  ggtitle("Distribution of class labels") +
+  common_theme
+
+print(plot1)
+```
+
+
+```{r}
+cat("\n Data highly imbalanced. \n SMOTE being implemented...")
+```
+
+set number of fraud and legitimate cases and desired % of legitimate cases
+```{r}
+n0 <- nrow(subset(df_og,Class==0))
+n1 <- nrow(subset(df_og,Class==1))
+r0 <- 0.65
+```
+
+Calculate value for dup_size parameter of SMOTE
+```{r}
+ntimes <- ((1 - r0) / r0) * (n0/n1) - 1
+```
+
+Create synthetic fraud cases with SMOTE
+```{r}
+set.seed(1234)
+smote_output = SMOTE(X = df_og[ , -c(1,31)], target = df_og$Class, K = 5, dup_size = ntimes)
+```
+
+SMOTE output
+```{r}
+df_new <- smote_output$data
+colnames(df_new)[30] <- "Class"
+
+df_new$Class <- as.factor(df_new$Class)
+```
+
+Plot of SMOTE output
+```{r}
+plot2 <- ggplot(data = df_new, aes(x = factor(Class), 
+                         y = prop.table(after_stat(count)), fill = factor(Class),
+                         label = scales::percent(prop.table(after_stat(count))))) +
+  geom_bar(position = "dodge") + 
+  geom_text(stat = 'count',
+            position = position_dodge(.9), 
+            vjust = -0.5, 
+            size = 3) + 
+  scale_x_discrete(labels = c("no fraud", "fraud"))+
+  scale_y_continuous(labels = scales::percent)+
+  labs(x = 'Class', y = 'Percentage') +
+  ggtitle("Distribution of class labels") +
+  common_theme
+
+print(plot2)
+```
+
+sample data randomly
+```{r}
+set.seed(333)
+x <- sample(1:nrow(df_new),50000)
+
+df <- df_new[x, ]
+```
+
+Splitting data in train and test data
+```{r}
+set.seed(444)
+split <- sample.split(df, SplitRatio = 0.7)
+train <- subset(df, split == "TRUE")
+test <- subset(df, split == "FALSE")
+```
+
+Training Random Forest model
+```{r}
+trControl = trainControl(method = "cv", number = 10, allowParallel = TRUE, verboseIter = FALSE, savePredictions = TRUE)
+modfit <- train(Class ~ ., data = train, method = "rf", trControl = trControl)
+```
+
+```{r}
+cat("Model trained successfully!")
+```
+
+Predict the class
+```{r}
+testclass <- predict(modfit,test)
+```
+
+
+Creating the confusion matrix
+```{r}
+cfMatrix <- confusionMatrix(testclass, as.factor(test$Class))
+print(cfMatrix)
+```
+
+Training Logistic Regression model
+```{r}
+set.seed(766)
+
+reguarlized_model <- train(Class ~ ., data = train, 
+                           method = "glmnet", 
+                           metric = "Accuracy",
+                           
+                           trControl = trainControl(method = "cv", 
+                                                    number = 10,
+                                                    search = "random",
+                                                    verboseIter = T))
+
+```
+
+Predict class
+```{r}
+t2 <- predict(reguarlized_model,test)
+```
+
+Creating the confusion matrix
+```{r}
+cm <- confusionMatrix(t2,as.factor(test$Class))
+print(cm)
+```
+
+Output dataframe comparing evaluation metrics of two algorithms
+```{r}
+output <- data.frame(metric=rep(c('Accuracy', 'Sensitivity','Specificity', 'Precision'), each=4),
+                 position=rep(c('Logistic Regression', 'Random Forest'), times=2),
+                 percentage=c(99.51,98.52,98.76,99.84,96.32,99.19,91.01,98.38))
+```
+
+Final plot of evaluation metrics
+```{r}
+plot3 <- ggplot(output, aes(fill=position, y=percentage, x=metric)) + 
+  geom_bar(position='dodge', stat='identity')
+
+print(plot3)
+```
+
